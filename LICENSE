@@ -1,0 +1,24 @@
+Todos los derechos reservados
+Copyright (c) 2026 Luis Alfonso Hernández Núñez
+
+Este repositorio contiene documentación de ingeniería y artefactos de
+infraestructura publicados con un único propósito: servir como evidencia
+técnica verificable del trabajo de su autor.
+
+NO es software de código abierto.
+
+Se concede permiso para LEER y CITAR este material con fines de evaluación
+profesional, académica o periodística, siempre que se atribuya a su autor.
+
+Queda expresamente prohibido, sin autorización previa y por escrito:
+
+  - Usar este material, total o parcialmente, en un producto o servicio.
+  - Copiar, adaptar o redistribuir su contenido.
+  - Crear obras derivadas a partir de él.
+  - Usarlo para entrenar modelos de aprendizaje automático.
+
+MileCommand es un producto comercial en desarrollo. Su código fuente, su
+modelo de datos, su diseño de dominio y su documentación de arquitectura
+son privados y NO forman parte de este repositorio.
+
+EL MATERIAL SE PROPORCIONA "TAL CUAL", SIN GARANTÍA DE NINGÚN TIPO.

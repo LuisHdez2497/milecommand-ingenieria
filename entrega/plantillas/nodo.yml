@@ -1,0 +1,29 @@
+# Toolchain de Node. Las versiones salen de `.toolchain`, que es la fuente única:
+# una versión escrita aquí y otra allá se desincronizan sin que nada lo diga.
+steps:
+  - script: |
+      set -e
+      set -a
+      . ./.toolchain
+      set +a
+      echo "##vso[task.setvariable variable=versionNode]$NODE_VERSION"
+      echo "##vso[task.setvariable variable=versionPnpm]$PNPM_VERSION"
+      echo "##vso[task.setvariable variable=versionFlutter]$FLUTTER_VERSION"
+      echo "##vso[task.setvariable variable=versionSemgrep]$SEMGREP_VERSION"
+      echo "##vso[task.setvariable variable=versionFirebase]$FIREBASE_TOOLS_VERSION"
+      echo "node=$NODE_VERSION pnpm=$PNPM_VERSION flutter=$FLUTTER_VERSION semgrep=$SEMGREP_VERSION firebase=$FIREBASE_TOOLS_VERSION"
+    displayName: Leer .toolchain
+
+  # `NodeTool@0` está deprecada y lo avisa en cada corrida. `UseNode@1` es su
+  # reemplazo y toma el mismo `versionSpec`.
+  - task: UseNode@1
+    displayName: Node $(versionNode)
+    inputs:
+      version: $(versionNode)
+
+  - script: |
+      set -e
+      corepack enable
+      corepack prepare pnpm@$(versionPnpm) --activate
+      pnpm --version
+    displayName: pnpm $(versionPnpm)

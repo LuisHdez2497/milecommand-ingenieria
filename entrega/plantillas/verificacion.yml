@@ -1,0 +1,85 @@
+# Verificación completa. No repite la lista de gates: llama al mismo verificador
+# que se corre en la máquina de quien trabaja, y por eso local y CI no pueden
+# divergir. Ver la regla 21.
+parameters:
+  - name: base
+    type: string
+
+steps:
+  - template: nodo.yml
+
+  - script: pnpm install --frozen-lockfile
+    displayName: Dependencias
+
+  # La base se resuelve una vez y se comparte. Una rama de trabajo compara contra
+  # la rama destino del Pull Request; una corrida sobre `main` compara contra el
+  # commit anterior, que es la punta previa de la rama.
+  - script: |
+      set -e
+      BASE='${{ parameters.base }}'
+      case "$BASE" in
+        refs/heads/*) BASE="origin/${BASE#refs/heads/}" ;;
+      esac
+      echo "##vso[task.setvariable variable=baseResuelta]$BASE"
+      echo "comparando contra $BASE"
+    displayName: Resolver la base
+
+  # El alcance lo calcula el propio verificador. Se le pregunta aquí para no
+  # descargar el SDK de Flutter cuando nadie tocó la app: son minutos de agente
+  # gastados en verificar lo que nadie movió. La lógica vive en un solo lugar.
+  - script: |
+      set -e
+      node tools/verificar.mjs --base "$(baseResuelta)" --alcance | while IFS='=' read -r clave resto; do
+        echo "  $clave=$resto"
+        echo "##vso[task.setvariable variable=$clave]$resto"
+      done
+    displayName: Alcance de los cambios
+    name: alcance
+
+  - script: |
+      set -e
+      DESTINO="$(Agent.ToolsDirectory)/flutter"
+      if [ ! -x "$DESTINO/bin/flutter" ]; then
+        curl -fsSL -o /tmp/flutter.tar.xz \
+          "https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_$(versionFlutter)-stable.tar.xz"
+        mkdir -p "$(Agent.ToolsDirectory)"
+        tar -xJf /tmp/flutter.tar.xz -C "$(Agent.ToolsDirectory)"
+      fi
+      git config --global --add safe.directory "$DESTINO"
+      echo "##vso[task.prependpath]$DESTINO/bin"
+    displayName: Flutter $(versionFlutter)
+    condition: and(succeeded(), eq(variables['hayFlutter'], 'true'))
+
+  # Los tests de integración arrancan el grafo real de Nest, y ese valida el
+  # entorno completo -- no solo la base. En una máquina de trabajo eso lo da
+  # `packages/api/.env`, que no se versiona; en un agente no existe, y el arranque
+  # falla con `Invalid environment configuration` sobre secretos que nadie puso.
+  #
+  # **No se hardcodean.** Aunque en CI sean desechables, son de forma credencial y
+  # la regla 28 lo prohíbe. Se generan aquí, se marcan como secretas y mueren con
+  # el agente. Las longitudes las fija el esquema: 32 caracteres para los JWT y una
+  # llave de 32 bytes en base64 para MFA.
+  - script: |
+      set -e
+      echo "##vso[task.setvariable variable=jwtAccess;issecret=true]$(openssl rand -hex 32)"
+      echo "##vso[task.setvariable variable=jwtRefresh;issecret=true]$(openssl rand -hex 32)"
+      echo "##vso[task.setvariable variable=jwtMfa;issecret=true]$(openssl rand -hex 32)"
+      echo "##vso[task.setvariable variable=mfaKey;issecret=true]$(openssl rand -base64 32)"
+      echo "##vso[task.setvariable variable=adminPass;issecret=true]$(openssl rand -hex 16)"
+    displayName: Secretos desechables de la corrida
+
+  - script: node tools/verificar.mjs --base "$(baseResuelta)"
+    displayName: Verificación (el mismo script que en local)
+    env:
+      # ─── Retirado de la copia pública ────────────────────────────────────────
+      #
+      # Aquí van las variables de entorno que el grafo de Nest valida al arrancar:
+      # la conexión a la base del contenedor de servicio, y los secretos generados
+      # en el paso anterior con `openssl rand`.
+      #
+      # **La lista concreta no se publica.** No son secretos —los valores nacen y
+      # mueren con el agente— pero sus nombres describen la superficie de
+      # configuración del producto, y eso es diseño, no práctica de ingeniería.
+      #
+      # Se dice aquí en vez de borrar el paso, porque un artefacto recortado sin
+      # avisar deja de ser evidencia: quien lo lea tiene derecho a saber qué falta.

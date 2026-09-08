@@ -1,0 +1,69 @@
+# Publicación a Firebase. Solo sale lo que cambió, y lo decide el grafo de Nx, no
+# un glob de rutas: tocar `packages/ui` no cambia ningún archivo de las tres SPA y
+# sin embargo las afecta a las tres.
+#
+# El API no se construye aquí. App Hosting sube el fuente, lo compila en Cloud
+# Build con el `buildCommand` de `apphosting.yaml` y despliega a Cloud Run: hacerlo
+# también en el agente serían los mismos minutos pagados dos veces.
+parameters:
+  - name: proyecto
+    type: string
+
+steps:
+  - template: nodo.yml
+
+  - script: pnpm install --frozen-lockfile
+    displayName: Dependencias
+
+  - script: |
+      set -e
+      AFECTADOS=$(npx nx show projects --affected --base=HEAD~1 --head=HEAD)
+      echo "proyectos afectados:"
+      echo "$AFECTADOS" | sed 's/^/  /'
+      contiene() { echo "$AFECTADOS" | grep -qx "$1" && echo true || echo false; }
+      ADMIN=$(contiene backoffice)
+      PORTAL=$(contiene portal)
+      SITIO=$(contiene site)
+      API=$(contiene api)
+      OBJETIVOS=''
+      APPS=''
+      [ "$ADMIN" = true ] && { OBJETIVOS="$OBJETIVOS,hosting:admin"; APPS="$APPS backoffice"; }
+      [ "$PORTAL" = true ] && { OBJETIVOS="$OBJETIVOS,hosting:portal"; APPS="$APPS portal"; }
+      [ "$SITIO" = true ] && { OBJETIVOS="$OBJETIVOS,hosting:site"; APPS="$APPS site"; }
+      [ "$API" = true ] && OBJETIVOS="$OBJETIVOS,apphosting:api"
+      OBJETIVOS="${OBJETIVOS#,}"
+      echo "##vso[task.setvariable variable=objetivos]$OBJETIVOS"
+      echo "##vso[task.setvariable variable=appsPorConstruir]$(echo $APPS)"
+      echo "se publicara: ${OBJETIVOS:-nada}"
+    displayName: Qué hay que publicar
+
+  - script: |
+      set -e
+      npx nx run-many -t build --projects="$(echo '$(appsPorConstruir)' | tr ' ' ',')" --skip-nx-cache
+    displayName: Construir las superficies afectadas
+    condition: and(succeeded(), ne(variables['appsPorConstruir'], ''))
+
+  # La llave de la cuenta de servicio vive en Library -> Secure files. No es una
+  # variable de texto: una variable secreta acaba en el log en cuanto alguien la
+  # imprime por accidente, y un JSON de credenciales no cabe cómodo en una.
+  - task: DownloadSecureFile@1
+    name: llaveFirebase
+    displayName: Llave de la cuenta de servicio
+    condition: and(succeeded(), ne(variables['objetivos'], ''))
+    inputs:
+      secureFile: firebase-deploy.json
+
+  - script: |
+      set -e
+      export GOOGLE_APPLICATION_CREDENTIALS="$(llaveFirebase.secureFilePath)"
+      npx --yes firebase-tools@$(versionFirebase) deploy \
+        --only "$(objetivos)" \
+        --project ${{ parameters.proyecto }} \
+        --non-interactive \
+        --message "$(Build.BuildNumber) · $(Build.SourceVersion)"
+    displayName: firebase deploy
+    condition: and(succeeded(), ne(variables['objetivos'], ''))
+
+  - script: echo "Ningun proyecto desplegable quedo afectado. No se publica nada."
+    displayName: Nada que publicar
+    condition: and(succeeded(), eq(variables['objetivos'], ''))

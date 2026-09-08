@@ -1,0 +1,125 @@
+# Integración continua y publicación de MileCommand.
+#
+# Corre en agentes efímeros de Microsoft: cada etapa arranca en una máquina limpia
+# y se destruye al terminar. Así ninguna computadora del equipo es requisito para
+# entregar, y lo que pasa en CI no depende de lo que alguien tenga instalado. El
+# precio es que el toolchain se declara en `.toolchain`, versión por versión.
+#
+# No repite la lista de gates: llama a `tools/verificar.mjs`, el mismo script que se
+# corre antes de commitear. Local y CI no pueden divergir porque son el mismo
+# código. Ver la regla 21.
+
+name: $(Date:yyyyMMdd)$(Rev:.r)
+
+# Este disparador es el de publicación: cada merge a `main` sale a producción
+# (regla 31). Los filtros de ruta son lo que evita gastar minutos en un cambio que
+# no puede afectar al producto -- documentación y reglas no viajan en ningún
+# bundle. `brand/` NO se excluye a propósito: sus maestros los vigila un guardia de
+# deriva, y si no corre, nadie se enteraría de que el SVG y el kit dejaron de
+# coincidir.
+trigger:
+  branches:
+    include: [main]
+  paths:
+    exclude:
+      - docs/*
+      - .claude/*
+      - '**/*.md'
+      - .gitattributes
+      - .gitignore
+      - .prettierignore
+
+# En Azure Repos el bloque `pr:` **se ignora**: lo que encola la validación de un
+# Pull Request es la política de compilación de la rama destino, configurada en el
+# repositorio. Se deja explícito en `none` porque es lo que la documentación de
+# Microsoft recomienda cuando la validación la gobierna la política, y para que
+# nadie lea un `pr:` con ramas y crea que aquí está declarado el disparador.
+#
+# Consecuencia práctica: **el filtro de ruta de los Pull Requests también vive en
+# esa política**, no en este archivo.
+pr: none
+
+pool:
+  vmImage: ubuntu-24.04
+
+# La misma imagen que `docker-compose.local.yml` levanta en la máquina de trabajo.
+# Si aquí se usara otra versión, la corrida verificaría un Postgres que nadie usa.
+resources:
+  containers:
+    - container: postgres
+      image: postgres:17-alpine
+      ports:
+        - '5432:5432'
+      env:
+        POSTGRES_USER: postgres
+        POSTGRES_PASSWORD: postgres
+        POSTGRES_DB: milecommand
+
+variables:
+  # Interruptor de compilación del despliegue. Vacío mientras no exista el archivo
+  # seguro con la llave de la cuenta de servicio.
+  #
+  # Tiene que ser de COMPILACIÓN y no una condición de ejecución, porque **Azure
+  # valida los archivos seguros y las conexiones de servicio de TODAS las etapas al
+  # compilar, sin mirar sus condiciones**. Una etapa de despliegue apagada con
+  # `condition:` tumba igual la corrida entera si su archivo seguro no existe --
+  # y la tumba antes de pedir agente, así que ni la verificación llega a arrancar.
+  # Lo que no se va a ejecutar, no se compila.
+  #
+  # Encenderlo es una decisión versionada: se sube `firebase-deploy.json` a
+  # Library -> Secure files y luego se cambia esta línea a 'true' en un commit.
+  - name: DESPLIEGUE_HABILITADO
+    value: ''
+  # Contra qué compara el verificador. En un Pull Request, la rama destino; en la
+  # corrida que publica, la punta anterior de `main`, que es lo que el merge trajo.
+  - name: baseAfectada
+    ${{ if eq(variables['Build.Reason'], 'PullRequest') }}:
+      value: $(System.PullRequest.TargetBranch)
+    ${{ else }}:
+      value: HEAD~1
+  - name: proyectoFirebase
+    value: milecommand
+
+stages:
+  - stage: Verificacion
+    displayName: Verificación
+    jobs:
+      - job: gates
+        displayName: Gates (el mismo script que en local)
+        # El nivel gratuito corta un trabajo a los 60 minutos, así que 55 es el
+        # techo útil: por encima, el agente lo mata sin dejar reporte.
+        timeoutInMinutes: 55
+        services:
+          postgres: postgres
+        steps:
+          - checkout: self
+            # Sin historia completa no hay contra qué comparar, y el verificador
+            # cae a «no se pudo comparar», que enciende todas las fases.
+            fetchDepth: 0
+          - template: .pipelines/plantillas/verificacion.yml
+            parameters:
+              base: $(baseAfectada)
+
+  # Publica solo al mezclar a `main`. Una corrida de Pull Request llega hasta la
+  # verificación y se detiene: todavía no hay nada mezclado que publicar.
+  #
+  # La etapa entera se compila solo si el interruptor de arriba está encendido; la
+  # condición de ejecución decide, además, si le toca correr en esta corrida.
+  - ${{ if ne(variables.DESPLIEGUE_HABILITADO, '') }}:
+      - stage: Despliegue
+        displayName: Despliegue
+        dependsOn: Verificacion
+        condition: |
+          and(succeeded(),
+              ne(variables['Build.Reason'], 'PullRequest'),
+              eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+        jobs:
+          - job: firebase
+            displayName: Publicar a Firebase
+            timeoutInMinutes: 55
+            steps:
+              - checkout: self
+                fetchDepth: 0
+              - template: .pipelines/plantillas/despliegue.yml
+                parameters:
+                  proyecto: $(proyectoFirebase)

@@ -1,0 +1,11 @@
+# Versiones del toolchain. Fuente única: las lee quien monte la máquina de
+# trabajo. Una versión que solo vive en un lugar se desincroniza del resto sin
+# que nadie se entere.
+NODE_VERSION=24
+PNPM_VERSION=10.12.2
+FLUTTER_VERSION=3.44.6
+# Semgrep se fija porque `latest` cambia sus reglas sin que nada lo diga: una
+# corrida verde de ayer y una roja de hoy sobre el mismo arbol no se distinguen
+# de una regresion. Se sube a proposito, en un commit.
+SEMGREP_VERSION=1.169.0
+FIREBASE_TOOLS_VERSION=15.1.0
