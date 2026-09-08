@@ -32,8 +32,40 @@ function toolchain() {
   return pares;
 }
 
-const VERSIONES = toolchain();
+function appsFlutter() {
+  const ruta = resolve(RAIZ, 'apps/pubspec.yaml');
+  if (!existsSync(ruta)) {
+    return [];
+  }
+  const bloque = /workspace:\s*\n((?:\s*-\s*\S+\s*\n)+)/.exec(readFileSync(ruta, 'utf8'));
+  if (bloque === null) {
+    return [];
+  }
+  return [...bloque[1].matchAll(/-\s*(\S+)/g)].map((encontrado) => encontrado[1]);
+}
 
+function descubrir() {
+  const manifiesto = resolve(RAIZ, 'packages/api/package.json');
+  if (!existsSync(manifiesto)) {
+    throw new Error(`Sin ${manifiesto} no se puede descubrir la forma del repositorio`);
+  }
+  const api = JSON.parse(readFileSync(manifiesto, 'utf8'));
+  const alcanceNpm = api.name.split('/')[0];
+  const librerias = Object.keys(api.dependencies ?? {})
+    .filter((nombre) => nombre.startsWith(`${alcanceNpm}/`))
+    .map((nombre) => nombre.slice(alcanceNpm.length + 1))
+    .sort();
+  return {
+    api: api.name,
+    librerias,
+    appFlutter: appsFlutter().find((miembro) => !miembro.includes('/')),
+    infra: existsSync(resolve(RAIZ, 'infra')),
+    navegador: existsSync(resolve(RAIZ, 'packages/sweep-e2e')),
+  };
+}
+
+const VERSIONES = toolchain();
+const FORMA = descubrir();
 const EN_AZURE = process.env.TF_BUILD === 'True';
 
 function abrirSeccion(nombre) {
@@ -83,23 +115,35 @@ function cambios() {
 const REESCRIBE_LA_VERIFICACION =
   /^(\.pipelines\/|azure-pipelines|\.toolchain|tools\/verificar\.mjs)/;
 const FLUTTER = /^apps\//;
+const INFRA = /^infra\//;
 const TYPESCRIPT =
   /^(packages\/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|nx\.json|tsconfig)/;
 
 function alcance() {
   if (TODO) {
-    return { flutter: true, typescript: true, motivo: 'bandera --todo' };
+    return { flutter: true, typescript: true, infra: true, motivo: 'bandera --todo' };
   }
   const lista = cambios();
   if (lista === null) {
-    return { flutter: true, typescript: true, motivo: `no se pudo comparar contra ${BASE}` };
+    return {
+      flutter: true,
+      typescript: true,
+      infra: true,
+      motivo: `no se pudo comparar contra ${BASE}`,
+    };
   }
   if (lista.some((archivo) => REESCRIBE_LA_VERIFICACION.test(archivo))) {
-    return { flutter: true, typescript: true, motivo: 'cambia como se verifica lo demas' };
+    return {
+      flutter: true,
+      typescript: true,
+      infra: true,
+      motivo: 'cambia como se verifica lo demas',
+    };
   }
   return {
     flutter: lista.some((archivo) => FLUTTER.test(archivo)),
     typescript: lista.some((archivo) => TYPESCRIPT.test(archivo)),
+    infra: lista.some((archivo) => INFRA.test(archivo)),
     motivo: `${lista.length} archivos contra ${BASE}`,
   };
 }
@@ -108,14 +152,14 @@ const ambito = alcance();
 
 if (bandera('--alcance')) {
   process.stdout.write(`hayTypescript=${ambito.typescript}\n`);
-  process.stdout.write(`hayFlutter=${ambito.flutter}\n`);
+  process.stdout.write(`hayFlutter=${ambito.flutter && FORMA.appFlutter !== undefined}\n`);
+  process.stdout.write(`hayInfra=${ambito.infra && FORMA.infra}\n`);
   process.stdout.write(`motivo=${ambito.motivo}\n`);
   process.exit(0);
 }
 
 const rutaDocker = RAIZ.split('\\').join('/');
-
-const CODIGO = /\.(ts|tsx|mts|cts|js|mjs|cjs|json|ya?ml|dart|sh|env\.example)$/;
+const CODIGO = /\.(ts|tsx|mts|cts|js|mjs|cjs|json|ya?ml|dart|tf|sh|env\.example)$/;
 
 function objetivoSemgrep() {
   if (TODO) {
@@ -138,77 +182,89 @@ const nx = TODO
   ? 'npx nx run-many -t lint typecheck test build --skip-nx-cache'
   : `npx nx affected -t lint typecheck test build --base=${BASE} --skip-nx-cache`;
 
+const conFlutter = ambito.flutter && !SIN_FLUTTER && FORMA.appFlutter !== undefined;
+const conInfra = ambito.infra && FORMA.infra;
+const conIntegracion = ambito.typescript && !SIN_INTEGRACION;
+
 const FASES = [
-  {
-    nombre: 'Formato',
-    comando: 'npx prettier --check .',
-    corre: true,
-  },
+  { nombre: 'Formato', comando: 'npx prettier --check .', corre: true },
   {
     nombre: 'Navegador de pruebas',
     comando: 'npx playwright install chromium',
-    corre: ambito.typescript,
+    corre: ambito.typescript && FORMA.navegador,
   },
-  {
-    nombre: 'Gates de TypeScript',
-    comando: nx,
-    corre: ambito.typescript,
-  },
+  { nombre: 'Gates de TypeScript', comando: nx, corre: ambito.typescript },
   {
     nombre: 'Formato de Dart',
     comando: 'cd apps && dart pub get && dart format --set-exit-if-changed .',
-    corre: ambito.flutter && !SIN_FLUTTER,
+    corre: conFlutter,
   },
   {
     nombre: 'Generados de Dart',
-    comando: 'cd apps/driver_app && dart run build_runner build --delete-conflicting-outputs',
-    corre: ambito.flutter && !SIN_FLUTTER,
+    comando: `cd apps/${FORMA.appFlutter} && dart run build_runner build --delete-conflicting-outputs`,
+    corre: conFlutter,
   },
   {
     nombre: 'Analisis de Flutter',
     comando: 'cd apps && flutter analyze --fatal-infos --fatal-warnings',
-    corre: ambito.flutter && !SIN_FLUTTER,
+    corre: conFlutter,
   },
   {
     nombre: 'Pruebas de Flutter',
-    comando: 'cd apps/driver_app && flutter test',
-    corre: ambito.flutter && !SIN_FLUTTER,
+    comando: `cd apps/${FORMA.appFlutter} && flutter test`,
+    corre: conFlutter,
   },
-  {
-    nombre: 'Analisis estatico (Semgrep)',
-    comando: semgrep,
-    corre: objetivo !== '',
-  },
+  { nombre: 'Analisis estatico (Semgrep)', comando: semgrep, corre: objetivo !== '' },
   {
     nombre: 'Dependencias vulnerables',
     comando: 'pnpm audit --prod --audit-level=high',
     corre: true,
   },
   {
+    nombre: 'Formato de Terraform',
+    comando: 'terraform fmt -recursive -check infra',
+    corre: conInfra,
+  },
+  {
+    nombre: 'Analisis de la infraestructura',
+    comando:
+      `docker run --rm -v "${rutaDocker}:/src" bridgecrew/checkov:${VERSIONES.CHECKOV_VERSION} ` +
+      '--directory /src/infra --framework terraform --compact --quiet',
+    corre: conInfra,
+  },
+  {
     nombre: 'Librerias del workspace',
-    comando: 'npx nx run-many -t build --projects=contracts,domain --skip-nx-cache',
-    corre: ambito.typescript && !SIN_INTEGRACION,
+    comando: `npx nx run-many -t build --projects=${FORMA.librerias.join(',')} --skip-nx-cache`,
+    corre: conIntegracion && FORMA.librerias.length > 0,
     omitidaPorBandera: SIN_INTEGRACION,
   },
   {
     nombre: 'Migraciones',
-    comando: 'pnpm --filter @milecommand/api migration:run',
-    corre: ambito.typescript && !SIN_INTEGRACION,
+    comando: `pnpm --filter ${FORMA.api} migration:run`,
+    corre: conIntegracion,
     omitidaPorBandera: SIN_INTEGRACION,
   },
   {
     nombre: 'Aislamiento contra Postgres',
     comando: 'npx nx run api:test --skip-nx-cache',
     entorno: { RUN_RLS_IT: 'true' },
-    corre: ambito.typescript && !SIN_INTEGRACION,
+    corre: conIntegracion,
     omitidaPorBandera: SIN_INTEGRACION,
   },
 ];
 
-process.stdout.write(`\nVerificacion de MileCommand\n`);
-process.stdout.write(`  alcance: typescript=${ambito.typescript} flutter=${ambito.flutter}\n`);
-process.stdout.write(`  motivo:  ${ambito.motivo}\n`);
-process.stdout.write(`  semgrep: ${VERSIONES.SEMGREP_VERSION}\n\n`);
+process.stdout.write(`\nVerificacion de ${FORMA.api.split('/')[0].replace('@', '')}\n`);
+process.stdout.write(
+  `  alcance:   typescript=${ambito.typescript} flutter=${ambito.flutter} infra=${ambito.infra}\n`,
+);
+process.stdout.write(`  motivo:    ${ambito.motivo}\n`);
+process.stdout.write(
+  `  forma:     api=${FORMA.api} librerias=${FORMA.librerias.join('+') || 'ninguna'} ` +
+    `flutter=${FORMA.appFlutter ?? 'ninguna'} infra=${FORMA.infra} navegador=${FORMA.navegador}\n`,
+);
+process.stdout.write(
+  `  semgrep=${VERSIONES.SEMGREP_VERSION} checkov=${VERSIONES.CHECKOV_VERSION ?? 'no aplica'}\n\n`,
+);
 
 const resultados = [];
 let rojo = false;
