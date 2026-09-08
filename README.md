@@ -31,13 +31,13 @@ ambiente intermedio donde equivocarse, y cada merge a la rama de producción pub
 
 ## Qué demuestra
 
-| Señal                                             | Dónde se comprueba                                                                                            |
-| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| **Una sola fuente para la verificación**          | [`entrega/verificar.mjs`](entrega/verificar.mjs) — el mismo script que corre en la máquina y en el pipeline    |
-| **Entrega automatizada con controles**            | [`entrega/`](entrega/) — verificación bloqueante por Pull Request y publicación automática al mezclar          |
-| **Decisiones registradas, con su costo**          | [`decisiones/`](decisiones/) — incluida una reemplazada, con el porqué                                        |
-| **Estándares que un linter hace cumplir**         | [`estandares/`](estandares/) — resumen de los 28 estándares y de qué los sostiene                             |
-| **Desarrollo dirigido por especificación, con IA** | [`metodo/`](metodo/) — el ciclo completo y los guardrails que lo hacen fiable                                 |
+| Señal                                              | Dónde se comprueba                                                                                          |
+| -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| **Una sola fuente para la verificación**           | [`entrega/verificar.mjs`](entrega/verificar.mjs) — el mismo script que corre en la máquina y en el pipeline |
+| **Entrega automatizada con controles**             | [`entrega/`](entrega/) — verificación bloqueante por Pull Request y publicación automática al mezclar       |
+| **Decisiones registradas, con su costo**           | [`decisiones/`](decisiones/) — incluida una reemplazada, con el porqué                                      |
+| **Estándares que un linter hace cumplir**          | [`estandares/`](estandares/) — resumen de los 28 estándares y de qué los sostiene                           |
+| **Desarrollo dirigido por especificación, con IA** | [`metodo/`](metodo/) — el ciclo completo y los guardrails que lo hacen fiable                               |
 
 ## Contenido
 
@@ -52,6 +52,10 @@ metodo/       Desarrollo dirigido por especificación, asistido por IA
 
 **El pipeline no repite la lista de gates: la llama.**
 
+Y **es el mismo archivo en los tres repositorios**: se descubre a si mismo —lee el paquete del API y
+sus librerias, la app de Flutter del espacio de trabajo de pub, y si existen infraestructura declarada y
+un arnes de navegador—, asi que dos fases aparecen solo donde aplican y ninguna copia divergira de otra.
+
 Es una decisión pequeña con una consecuencia grande. Mientras la lista de verificaciones vivió en dos
 sitios —un documento y un YAML— divergieron sin que nada lo dijera: el pipeline no corría el formateador,
 ni las pruebas de integración contra la base, ni instalaba el navegador de pruebas, y usaba una versión
@@ -63,11 +67,11 @@ depende de que alguien sincronice dos listas: es el mismo código.
 Ese cambio destapó tres defectos que llevaban meses escondidos, y los tres eran la misma familia: **un
 verde que se apoyaba en un artefacto que solo existía en la máquina de trabajo.**
 
-| Lo que fallaba en un agente limpio         | Por qué pasaba en local                                             |
-| ------------------------------------------ | ------------------------------------------------------------------- |
-| El análisis de la app móvil                | Los archivos generados por el generador de código no se versionan   |
-| Las migraciones de base de datos           | Los paquetes del monorepo se leen desde su `dist`, que no existía   |
-| Una prueba «intermitente» de integración   | Su fixture dependía del orden: insertaba nada, en silencio          |
+| Lo que fallaba en un agente limpio       | Por qué pasaba en local                                           |
+| ---------------------------------------- | ----------------------------------------------------------------- |
+| El análisis de la app móvil              | Los archivos generados por el generador de código no se versionan |
+| Las migraciones de base de datos         | Los paquetes del monorepo se leen desde su `dist`, que no existía |
+| Una prueba «intermitente» de integración | Su fixture dependía del orden: insertaba nada, en silencio        |
 
 La última no era intermitente. Su fixture ligaba un permiso con un `INSERT ... SELECT` sobre una tabla
 que en una base recién migrada está vacía, así que insertaba cero filas sin quejarse, y la prueba
@@ -77,15 +81,15 @@ dependía de que otra hubiera corrido antes. Ahora siembra lo suyo y **falla rui
 
 Doce fases, y las que no aplican se apagan leyendo el diff. Sobre un agente limpio: **6.9 minutos**.
 
-| Fase                                                | Cuándo corre                     |
-| --------------------------------------------------- | -------------------------------- |
-| Formato de todo el repositorio                      | Siempre                          |
-| Navegador de pruebas                                | Si cambió TypeScript             |
+| Fase                                                 | Cuándo corre                     |
+| ---------------------------------------------------- | -------------------------------- |
+| Formato de todo el repositorio                       | Siempre                          |
+| Navegador de pruebas                                 | Si cambió TypeScript             |
 | Lint · tipos · pruebas · compilación (solo afectado) | Si cambió TypeScript             |
 | Formato · generados · análisis · pruebas de Dart     | Si cambió la app móvil           |
-| Análisis estático de seguridad                      | Sobre los archivos que cambiaron |
-| Dependencias vulnerables                            | Siempre                          |
-| Librerías del monorepo                              | Si cambió TypeScript             |
+| Análisis estático de seguridad                       | Sobre los archivos que cambiaron |
+| Dependencias vulnerables                             | Siempre                          |
+| Librerías del monorepo                               | Si cambió TypeScript             |
 | Migraciones e **integración contra Postgres real**   | Si cambió TypeScript             |
 
 Tres detalles que no son estéticos:
@@ -103,10 +107,10 @@ existe porque «no se pudo correr» y «pasó» se ven igual en un reporte mal e
 
 ## Las decisiones, en una línea cada una
 
-| ADR                                                       | Decisión                                               | Por qué importa                                                                                                |
-| --------------------------------------------------------- | ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
-| [0001](decisiones/0001-azure-devops-sin-pipelines.md)     | Repositorio y tablero sin pipelines · **reemplazada**  | Se conserva porque un registro no se edita cuando cambia la decisión: se reemplaza, y el viejo dice qué se creyó |
-| [0003](decisiones/0003-pipeline-estricto-y-despliegue-automatico.md) | Pipeline estricto y despliegue automático   | La verificación en un solo lugar, y el costo de no tener aprobación manual escrito con todas sus letras         |
+| ADR                                                                  | Decisión                                              | Por qué importa                                                                                                  |
+| -------------------------------------------------------------------- | ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| [0001](decisiones/0001-azure-devops-sin-pipelines.md)                | Repositorio y tablero sin pipelines · **reemplazada** | Se conserva porque un registro no se edita cuando cambia la decisión: se reemplaza, y el viejo dice qué se creyó |
+| [0003](decisiones/0003-pipeline-estricto-y-despliegue-automatico.md) | Pipeline estricto y despliegue automático             | La verificación en un solo lugar, y el costo de no tener aprobación manual escrito con todas sus letras          |
 
 Falta el 0002 a propósito: es una decisión de diseño de producto y no se publica.
 
