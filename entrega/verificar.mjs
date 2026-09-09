@@ -44,6 +44,15 @@ function appsFlutter() {
   return [...bloque[1].matchAll(/-\s*(\S+)/g)].map((encontrado) => encontrado[1]);
 }
 
+function seLeeConstruida(carpeta) {
+  const manifiesto = resolve(RAIZ, 'packages', carpeta, 'package.json');
+  if (!existsSync(manifiesto)) {
+    return false;
+  }
+  const { main } = JSON.parse(readFileSync(manifiesto, 'utf8'));
+  return typeof main === 'string' && !main.includes('/src/');
+}
+
 function descubrir() {
   const manifiesto = resolve(RAIZ, 'packages/api/package.json');
   if (!existsSync(manifiesto)) {
@@ -54,6 +63,7 @@ function descubrir() {
   const librerias = Object.keys(api.dependencies ?? {})
     .filter((nombre) => nombre.startsWith(`${alcanceNpm}/`))
     .map((nombre) => nombre.slice(alcanceNpm.length + 1))
+    .filter((carpeta) => seLeeConstruida(carpeta))
     .sort();
   return {
     api: api.name,
@@ -150,9 +160,11 @@ function alcance() {
 
 const ambito = alcance();
 
+const conFlutter = ambito.flutter && !SIN_FLUTTER && FORMA.appFlutter !== undefined;
+
 if (bandera('--alcance')) {
   process.stdout.write(`hayTypescript=${ambito.typescript}\n`);
-  process.stdout.write(`hayFlutter=${ambito.flutter && FORMA.appFlutter !== undefined}\n`);
+  process.stdout.write(`hayFlutter=${conFlutter}\n`);
   process.stdout.write(`hayInfra=${ambito.infra && FORMA.infra}\n`);
   process.stdout.write(`motivo=${ambito.motivo}\n`);
   process.exit(0);
@@ -182,9 +194,11 @@ const nx = TODO
   ? 'npx nx run-many -t lint typecheck test build --skip-nx-cache'
   : `npx nx affected -t lint typecheck test build --base=${BASE} --skip-nx-cache`;
 
-const conFlutter = ambito.flutter && !SIN_FLUTTER && FORMA.appFlutter !== undefined;
 const conInfra = ambito.infra && FORMA.infra;
 const conIntegracion = ambito.typescript && !SIN_INTEGRACION;
+
+const flutterLoApagoLaBandera = SIN_FLUTTER && ambito.flutter && FORMA.appFlutter !== undefined;
+const integracionLaApagoLaBandera = SIN_INTEGRACION && ambito.typescript;
 
 const FASES = [
   { nombre: 'Formato', comando: 'npx prettier --check .', corre: true },
@@ -198,21 +212,25 @@ const FASES = [
     nombre: 'Formato de Dart',
     comando: 'cd apps && dart pub get && dart format --set-exit-if-changed .',
     corre: conFlutter,
+    omitidaPorBandera: flutterLoApagoLaBandera,
   },
   {
     nombre: 'Generados de Dart',
     comando: `cd apps/${FORMA.appFlutter} && dart run build_runner build --delete-conflicting-outputs`,
     corre: conFlutter,
+    omitidaPorBandera: flutterLoApagoLaBandera,
   },
   {
     nombre: 'Analisis de Flutter',
     comando: 'cd apps && flutter analyze --fatal-infos --fatal-warnings',
     corre: conFlutter,
+    omitidaPorBandera: flutterLoApagoLaBandera,
   },
   {
     nombre: 'Pruebas de Flutter',
     comando: `cd apps/${FORMA.appFlutter} && flutter test`,
     corre: conFlutter,
+    omitidaPorBandera: flutterLoApagoLaBandera,
   },
   { nombre: 'Analisis estatico (Semgrep)', comando: semgrep, corre: objetivo !== '' },
   {
@@ -236,20 +254,20 @@ const FASES = [
     nombre: 'Librerias del workspace',
     comando: `npx nx run-many -t build --projects=${FORMA.librerias.join(',')} --skip-nx-cache`,
     corre: conIntegracion && FORMA.librerias.length > 0,
-    omitidaPorBandera: SIN_INTEGRACION,
+    omitidaPorBandera: integracionLaApagoLaBandera,
   },
   {
     nombre: 'Migraciones',
     comando: `pnpm --filter ${FORMA.api} migration:run`,
     corre: conIntegracion,
-    omitidaPorBandera: SIN_INTEGRACION,
+    omitidaPorBandera: integracionLaApagoLaBandera,
   },
   {
     nombre: 'Aislamiento contra Postgres',
     comando: 'npx nx run api:test --skip-nx-cache',
     entorno: { RUN_RLS_IT: 'true' },
     corre: conIntegracion,
-    omitidaPorBandera: SIN_INTEGRACION,
+    omitidaPorBandera: integracionLaApagoLaBandera,
   },
 ];
 

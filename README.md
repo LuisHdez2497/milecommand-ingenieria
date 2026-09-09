@@ -101,9 +101,20 @@ Tres detalles que no son estéticos:
 - **El análisis estático se acota a lo que cambió.** Medido: 6 segundos sobre tres archivos contra más de
   quince minutos sin terminar sobre el árbol completo. Un gate que tarda quince minutos es un gate que se
   salta.
+- **Y el gate de dependencias es el único que se pone rojo sin que nadie toque el código**, porque mide
+  el árbol contra un catálogo que se actualiza solo. Su corrección tiene su propia trampa: el gestor de
+  paquetes admite declarar los anclajes de versión en dos archivos, y donde los dos existen **gana uno y
+  descarta los del otro enteros, sin un aviso** — así que un anclaje escrito en el archivo equivocado no
+  solo no aplica: apaga los que ya estaban, y el gate sigue en verde hasta que vuelve el aviso que apagó.
 
 Y el resumen distingue tres estados, no dos: verde, no aplica y **omitida por bandera**. Lo tercero
 existe porque «no se pudo correr» y «pasó» se ven igual en un reporte mal escrito.
+
+**Una fase que no puede ejecutar nada dice «no aplica», nunca verde.** La que construye las librerías
+del monorepo las descubría todas, incluidas las que se consumen desde fuente — y el orquestador **no
+falla cuando el objetivo no existe**: informa «No tasks were run» y sale con cero. En los repositorios
+hermanos, donde ninguna librería se lee construida, la fase llevaba saliendo verde sin haberse
+ejecutado. Es la cuarta vez que aparece la misma familia de defecto, y por eso está escrita aquí.
 
 ## Las decisiones, en una línea cada una
 
@@ -120,6 +131,16 @@ Que un despliegue automático **sin aprobación** llega a un cliente en minutos,
 interpone es una corrida de verificación. Que la revisión del Pull Request es la propia mientras el
 equipo sea una persona. Y que los minutos de agente del nivel gratuito son un techo real: si el mes se
 agota, la única barrera automática deja de correr.
+
+Y una más, deliberada y medida: **la app móvil está detrás de un interruptor apagado.** Es un esqueleto
+que todavía no se construye, y verificarla cuesta 159 de los 386 segundos de una corrida —62 en bajar su
+SDK y 97 en sus cuatro fases—, así que el pipeline no las paga. El interruptor está **versionado en el
+YAML**, igual que el del despliegue: encenderlo es un commit, no un clic en un portal.
+
+Lo que hace que no sea una trampa es cómo se reporta. Las fases apagadas no salen en verde: salen como
+**omitidas por bandera**, un estado distinto de «no aplica», y el resumen cierra con «una fase que no
+corrió no es una fase que pasó». El costo se dice entero: mientras el interruptor esté apagado, **nada
+verifica esa app en CI**, y romper su código dejaría un Pull Request en verde.
 
 Están escritas en el ADR 0003, en su sección de consecuencias, porque una decisión sin sus costos
 escritos se lee como si no tuviera ninguno.

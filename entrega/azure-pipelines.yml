@@ -69,7 +69,7 @@ variables:
   # Encenderlo es una decisión versionada: se sube `firebase-deploy.json` a
   # Library -> Secure files y luego se cambia esta línea a 'true' en un commit.
   - name: DESPLIEGUE_HABILITADO
-    value: ''
+    value: 'true'
   # Contra qué compara el verificador. En un Pull Request, la rama destino; en la
   # corrida que publica, la punta anterior de `main`, que es lo que el merge trajo.
   - name: baseAfectada
@@ -79,6 +79,25 @@ variables:
       value: HEAD~1
   - name: proyectoFirebase
     value: milecommand
+  # Interruptor de Flutter. La app del conductor es un esqueleto que todavía no
+  # se construye (ver README), y verificarla cuesta **159 de los 386 segundos**
+  # de una corrida: 62 en bajar el SDK y 97 en sus cuatro fases. Mientras siga
+  # siendo un esqueleto, el pipeline no las paga.
+  #
+  # Apagarlo NO la deja en verde: las fases salen como `OMITIDA POR BANDERA`,
+  # que es un estado distinto de `no aplica`, porque «no se pudo correr» y
+  # «pasó» no se pueden ver igual (regla 21). El costo asumido está escrito
+  # ahí: mientras esté apagado, nadie verifica `apps/`.
+  #
+  # En la máquina no cambia nada: `pnpm verify` sigue corriendo Flutter cuando
+  # se toca `apps/`. Y encenderlo aquí es un commit, no un clic en el portal.
+  - name: FLUTTER_HABILITADO
+    value: ''
+  - name: banderasVerificador
+    ${{ if eq(variables.FLUTTER_HABILITADO, '') }}:
+      value: '--sin-flutter'
+    ${{ else }}:
+      value: ''
 
 stages:
   - stage: Verificacion
@@ -99,6 +118,7 @@ stages:
           - template: .pipelines/plantillas/verificacion.yml
             parameters:
               base: $(baseAfectada)
+              banderas: $(banderasVerificador)
 
   # Publica solo al mezclar a `main`. Una corrida de Pull Request llega hasta la
   # verificación y se detiene: todavía no hay nada mezclado que publicar.

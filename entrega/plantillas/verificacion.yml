@@ -4,6 +4,13 @@
 parameters:
   - name: base
     type: string
+  # Banderas que el pipeline le pasa al verificador. Van a **las dos**
+  # invocaciones, y eso es lo que importa: la primera decide si se descarga el
+  # SDK de Flutter y la segunda, si se corren sus fases. Pasarla solo a la
+  # segunda ahorraría los 97s de las fases y seguiría pagando los 62s del SDK.
+  - name: banderas
+    type: string
+    default: ''
 
 steps:
   - template: nodo.yml
@@ -29,7 +36,7 @@ steps:
   # gastados en verificar lo que nadie movió. La lógica vive en un solo lugar.
   - script: |
       set -e
-      node tools/verificar.mjs --base "$(baseResuelta)" --alcance | while IFS='=' read -r clave resto; do
+      node tools/verificar.mjs --base "$(baseResuelta)" ${{ parameters.banderas }} --alcance | while IFS='=' read -r clave resto; do
         echo "  $clave=$resto"
         echo "##vso[task.setvariable variable=$clave]$resto"
       done
@@ -68,7 +75,7 @@ steps:
       echo "##vso[task.setvariable variable=adminPass;issecret=true]$(openssl rand -hex 16)"
     displayName: Secretos desechables de la corrida
 
-  - script: node tools/verificar.mjs --base "$(baseResuelta)"
+  - script: node tools/verificar.mjs --base "$(baseResuelta)" ${{ parameters.banderas }}
     displayName: Verificación (el mismo script que en local)
     env:
       # ─── Retirado de la copia pública ────────────────────────────────────────
